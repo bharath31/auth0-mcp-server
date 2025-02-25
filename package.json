@@ -1,0 +1,25 @@
+{
+    "name": "auth0-mcp-server",
+    "version": "1.0.0",
+    "description": "Minimal Auth0 MCP Server",
+    "type": "module",
+    "main": "dist/index.js",
+    "bin": {
+        "auth0-mcp": "./bin/auth0-mcp"
+    },
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js run",
+        "test": "node test/simple-test.js"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.6.0",
+        "debug": "^4.3.4",
+        "node-fetch": "^3.3.2"
+    },
+    "devDependencies": {
+        "@types/debug": "^4.1.12",
+        "@types/node": "^20.11.5",
+        "typescript": "^5.3.3"
+    }
+}
