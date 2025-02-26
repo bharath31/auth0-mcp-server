@@ -19,6 +19,8 @@
         "utils:fix-token": "node utils/fix-token-retrieval.js",
         "utils:setup-secure": "node utils/update-claude-config-secure.js",
         "utils:setup": "node utils/update-claude-config.js",
+        "utils:validate-env": "node utils/env-validator.js",
+        "setup": "chmod +x utils/setup-cli-path.js && node utils/setup-cli-path.js",
         "clean": "rm -rf logs/*.log",
         "debug-server": "DEBUG=auth0-mcp:* node dist/index.js run"
     },

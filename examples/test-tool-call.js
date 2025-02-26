@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuration
-const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN || 'dev-e6lvf4q7ybhifyfp.us.auth0.com';
+const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN || 'your-tenant.auth0.com';
 const SERVER_PATH = process.env.SERVER_PATH || path.join(__dirname, 'dist/index.js');
 const WRAPPER_PATH = process.env.WRAPPER_PATH || path.join(__dirname, 'dynamic-wrapper.sh');
 const DEBUG = process.env.DEBUG === 'true';

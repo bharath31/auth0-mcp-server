@@ -14,8 +14,11 @@ import fs from 'fs';
 
 // Configuration
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVER_PATH = path.join(__dirname, 'dist', 'index.js');
-const AUTH0_DOMAIN = 'dev-e6lvf4q7ybhifyfp.us.auth0.com';
+const SERVER_PATH = path.join(__dirname, '..', 'dist', 'index.js');
+const WRAPPER_PATH = path.join(__dirname, 'dynamic-wrapper.sh');
+
+// Set debug mode
+process.env.AUTH0_MCP_DEBUG = 'true';
 
 // Helper for logging with timestamp
 function log(message) {
@@ -37,7 +40,7 @@ async function testServerStartup() {
   log('Starting server process...');
   
   // Start the server process
-  const serverProcess = spawn('node', [SERVER_PATH, 'run', AUTH0_DOMAIN], {
+  const serverProcess = spawn('node', [SERVER_PATH, 'run'], {
     env: {
       ...process.env,
       DEBUG: 'auth0-mcp:*'

@@ -20,8 +20,8 @@ const CLAUDE_CONFIG_PATH = path.join(HOME_DIR, 'Library', 'Application Support',
 const DYNAMIC_WRAPPER_PATH = path.join(__dirname, 'dynamic-wrapper.sh');
 
 // Define paths and constants
-const AUTH0_DOMAIN = 'dev-e6lvf4q7ybhifyfp.us.auth0.com';
-const LOCAL_AUTH0_CLI_PATH = '/Users/bharath/dev/mcp/auth0-cli/auth0';
+const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN || 'your-tenant.auth0.com';
+const LOCAL_AUTH0_CLI_PATH = process.env.AUTH0_CLI_PATH || '';
 
 // Make the script executable
 async function makeScriptExecutable() {

@@ -23,9 +23,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEBUG = process.env.DEBUG || true;
 const SERVER_PATH = path.join(__dirname, 'dist', 'index.js');
 const WRAPPER_PATH = path.join(__dirname, 'dynamic-wrapper.sh');
-const AUTH0_DOMAIN = 'dev-e6lvf4q7ybhifyfp.us.auth0.com';
+const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN || 'your-tenant.auth0.com';
 const NODE_PATH = process.env.NODE || process.env.NODE_PATH || 'node';
-const LOCAL_AUTH0_CLI_PATH = '/Users/bharath/dev/mcp/auth0-cli/auth0';
+const LOCAL_AUTH0_CLI_PATH = process.env.AUTH0_CLI_PATH || '';
 
 // Utility functions
 function log(...args) {
@@ -171,14 +171,14 @@ async function testMCPServerConnection(useLiveServer = false) {
       log('Wrapper path: %s', WRAPPER_PATH);
       log('Server path: %s', SERVER_PATH);
       log('NODE_PATH: %s', process.env.NODE_PATH || 'node');
-      log('AUTH0_DOMAIN: %s', process.env.AUTH0_DOMAIN || 'dev-e6lvf4q7ybhifyfp.us.auth0.com');
-      log('AUTH0_CLI_PATH: %s', process.env.AUTH0_CLI_PATH || '/Users/bharath/dev/mcp/auth0-cli/auth0');
+      log('AUTH0_DOMAIN: %s', process.env.AUTH0_DOMAIN || 'your-tenant.auth0.com');
+      log('AUTH0_CLI_PATH: %s', process.env.AUTH0_CLI_PATH || '');
 
       // Create environment for the server process
       const env = {
         ...process.env,
         DEBUG: 'auth0-mcp:*',
-        AUTH0_CLI_PATH: process.env.AUTH0_CLI_PATH || '/Users/bharath/dev/mcp/auth0-cli/auth0',
+        AUTH0_CLI_PATH: process.env.AUTH0_CLI_PATH || '',
         AUTH0_TOKEN_DYNAMIC: 'true'
       };
       
@@ -382,188 +382,4 @@ async function testMCPServerConnection(useLiveServer = false) {
       
       // Check if the tool call was successful
       if (callToolResponse.error) {
-        console.log(`Tool call error: ${callToolResponse.error.message}`);
-      } else if (callToolResponse.result && callToolResponse.result.toolResult) {
-        console.log('Tool call successful!');
-        
-        // Check if there was an error in the tool execution
-        if (callToolResponse.result.toolResult.isError) {
-          const errorContent = callToolResponse.result.toolResult.content[0];
-          console.log(`Tool execution error: ${errorContent.text}`);
-        } else {
-          console.log('Tool execution successful!');
-        }
-      }
-    } catch (error) {
-      console.log(`Error testing tool call: ${error.message}`);
-    }
-    
-    return {
-      success: true,
-      tools: listToolsResponse.result.tools
-    };
-    
-  } catch (error) {
-    log('Error in MCP server test: %s', error.message);
-    
-    return {
-      success: false,
-      error: error.message
-    };
-  } finally {
-    // Close the server process if we started one
-    log('Terminating server process');
-    closeServerProcess();
-  }
-}
-
-// Helper function to read one line from a stream
-function readLineFromStream(stream) {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: stream,
-      crlfDelay: Infinity
-    });
-    
-    rl.once('line', (line) => {
-      rl.close();
-      resolve(line);
-    });
-  });
-}
-
-// Verify Claude Desktop configuration
-async function checkClaudeDesktopConfig() {
-  log('Checking Claude Desktop configuration...');
-  try {
-    const configPath = path.join(process.env.HOME, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
-    if (!fs.existsSync(configPath)) {
-      throw new Error('Claude Desktop config file not found');
-    }
-    
-    const configData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (!configData.mcpServers || !configData.mcpServers.auth0) {
-      throw new Error('Auth0 MCP server not configured in Claude Desktop');
-    }
-    
-    const auth0Config = configData.mcpServers.auth0;
-    log('Auth0 MCP Server configuration:');
-    log('- Command:', auth0Config.command);
-    log('- Args:', auth0Config.args);
-    log('- Capabilities:', auth0Config.capabilities);
-    log('- Environment variables:');
-    Object.entries(auth0Config.env || {}).forEach(([key, value]) => {
-      log(`  - ${key}: ${key === 'AUTH0_TOKEN' ? '[REDACTED]' : value}`);
-    });
-    
-    // Check for wrapper script usage
-    if (auth0Config.command === WRAPPER_PATH) {
-      log('✅ Using wrapper script for token retrieval');
-    } else if (auth0Config.env && auth0Config.env.AUTH0_TOKEN) {
-      log('⚠️ Using static token in config (not recommended)');
-    } else {
-      log('⚠️ No token mechanism detected in config');
-    }
-    
-    return { 
-      success: true, 
-      config: auth0Config
-    };
-  } catch (error) {
-    log('Error checking Claude Desktop config:', error.message);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
-// Main function to run all tests
-async function runTests() {
-  console.log('=== Auth0 MCP Server Connection Test ===');
-  console.log('Testing timestamp:', new Date().toISOString());
-  console.log('Environment:');
-  console.log('- HOME:', process.env.HOME);
-  console.log('- PATH:', process.env.PATH);
-  console.log('- AUTH0_DOMAIN:', AUTH0_DOMAIN);
-  console.log('- NODE_PATH:', NODE_PATH);
-  console.log('- SERVER_PATH:', SERVER_PATH);
-  console.log('- WRAPPER_PATH:', WRAPPER_PATH);
-  console.log('============================================');
-  
-  try {
-    // Step 1: Check if token can be retrieved
-    console.log('\n🔑 Step 1: Testing token retrieval');
-    try {
-      const token = await getToken();
-      console.log(`✅ Successfully retrieved token (length: ${token.length})`);
-    } catch (error) {
-      console.log(`❌ Failed to retrieve token: ${error.message}`);
-      console.log('This is a critical issue - the server needs a valid token to function');
-    }
-    
-    // Step 2: Check direct API connection
-    console.log('\n🌐 Step 2: Testing direct API connection');
-    const apiConnectionResult = await testDirectApiConnection();
-    if (apiConnectionResult) {
-      console.log('✅ Successfully connected to Auth0 API');
-    } else {
-      console.log('❌ Failed to connect to Auth0 API');
-      console.log('Check your network connection and Auth0 domain');
-    }
-    
-    // Step 3: Check Claude Desktop configuration
-    console.log('\n⚙️ Step 3: Checking Claude Desktop configuration');
-    const configResult = await checkClaudeDesktopConfig();
-    if (configResult.success) {
-      console.log('✅ Claude Desktop configuration is valid');
-    } else {
-      console.log(`❌ Claude Desktop configuration issue: ${configResult.error}`);
-    }
-    
-    // Step 4: Test local MCP server connection
-    console.log('\n🔌 Step 4: Testing local MCP server connection');
-    const localServerResult = await testMCPServerConnection(false);
-    if (localServerResult.success) {
-      console.log('✅ Local MCP server connection successful');
-    } else {
-      console.log(`❌ Local MCP server connection failed: ${localServerResult.error}`);
-    }
-    
-    // Conclusion
-    console.log('\n📊 Test Results Summary:');
-    console.log('1. Token Retrieval: ' + (await canGetToken() ? '✅ Success' : '❌ Failed'));
-    console.log('2. Direct API Access: ' + (apiConnectionResult ? '✅ Success' : '❌ Failed'));
-    console.log('3. Claude Config: ' + (configResult.success ? '✅ Valid' : '❌ Invalid'));
-    console.log('4. Local Server: ' + (localServerResult.success ? '✅ Working' : '❌ Issues'));
-    
-    if (await canGetToken() && apiConnectionResult && configResult.success && localServerResult.success) {
-      console.log('\n🎉 All tests passed! If you are still experiencing connection issues with Claude Desktop:');
-      console.log('1. Try restarting Claude Desktop');
-      console.log('2. Check if there\'s a firewall or network issue when Claude is running');
-      console.log('3. Verify all processes have the necessary permissions');
-    } else {
-      console.log('\n🔍 There are issues that need to be addressed - review the details above');
-    }
-    
-  } catch (error) {
-    console.error('Error running tests:', error);
-  }
-}
-
-// Helper function to check if we can get a token
-async function canGetToken() {
-  try {
-    await getToken();
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-// Run the tests when this script is executed directly
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runTests();
-}
-
-export { runTests, testDirectApiConnection, testMCPServerConnection, getToken }; 
+        console.log(`

@@ -14,7 +14,7 @@ import os from 'os';
 
 // Set up basic configuration
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AUTH0_DOMAIN = 'dev-e6lvf4q7ybhifyfp.us.auth0.com';
+const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN || 'your-tenant.auth0.com';
 const NODE_PATH = process.env.NODE_PATH || 'node';
 const DEBUG = process.env.DEBUG === 'true';
 

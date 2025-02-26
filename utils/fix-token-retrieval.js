@@ -1,51 +1,119 @@
 #!/usr/bin/env node
 
 /**
- * Auth0 Token Retrieval Fix
+ * Auth0 MCP Server Token Fixer
  * 
- * This script attempts to fix the token retrieval issue by:
- * 1. Creating a specific environment file for the server
- * 2. Creating a simplified wrapper script
+ * This script helps fix token retrieval issues by:
+ * 1. Finding an existing token from Auth0 CLI or config files
+ * 2. Creating an environment file with the token
+ * 3. Creating a simplified wrapper script
+ * 4. Updating Claude Desktop config to use the wrapper
  */
 
-import fs from 'fs';
-import path from 'path';
-import { execSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { fileURLToPath } from 'url';
-import os from 'os';
+import { execSync } from 'child_process';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Get __dirname equivalent in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// User's home directory
 const HOME_DIR = os.homedir();
 
-// Paths to check for existing token
-const CONFIG_PATHS = [
-  path.join(HOME_DIR, '.config', 'auth0', 'config.json'),
-  path.join(HOME_DIR, '.auth0', 'config.json')
-];
+// Try to get CLI path
+function getAuth0CliPath() {
+  const cliPathEnv = process.env.AUTH0_CLI_PATH;
+  
+  // If explicitly set in env, use it
+  if (cliPathEnv && fs.existsSync(cliPathEnv)) {
+    return cliPathEnv;
+  }
+  
+  // Otherwise try to find it in PATH
+  try {
+    return execSync('which auth0', { encoding: 'utf8' }).trim();
+  } catch (e) {
+    // Try specific paths as fallback
+    const possiblePaths = [
+      path.join(HOME_DIR, '.local', 'bin', 'auth0'),
+      path.join(HOME_DIR, 'bin', 'auth0'),
+      path.resolve(process.cwd(), '..', 'auth0-cli', 'auth0')
+    ];
+    
+    for (const possiblePath of possiblePaths) {
+      if (fs.existsSync(possiblePath)) {
+        return possiblePath;
+      }
+    }
+  }
+  
+  return 'auth0'; // Hope it's in PATH
+}
 
-console.log('=== Auth0 Token Retrieval Fix ===');
+// Try to get Auth0 domain from CLI
+function getAuth0Domain() {
+  try {
+    const cliPath = getAuth0CliPath();
+    console.log(`Using Auth0 CLI: ${cliPath}`);
+    
+    const tenantInfo = execSync(`${cliPath} tenants list --json`, { encoding: 'utf8' });
+    const tenants = JSON.parse(tenantInfo);
+    
+    if (tenants && tenants.length > 0) {
+      const activeTenant = tenants.find(t => t.active) || tenants[0];
+      console.log(`Found tenant: ${activeTenant.name}`);
+      return activeTenant.name;
+    }
+  } catch (e) {
+    console.log(`Unable to get domain from CLI: ${e.message}`);
+  }
+  
+  return process.env.AUTH0_DOMAIN || 'your-tenant.auth0.com';
+}
 
-// Try to find an existing token
+// Find an existing token from various sources
 function findExistingToken() {
   console.log('Looking for existing Auth0 token...');
   
-  for (const configPath of CONFIG_PATHS) {
-    console.log(`Checking ${configPath}...`);
+  // Try to get token from Auth0 CLI
+  try {
+    const cliPath = getAuth0CliPath();
+    console.log(`Trying to get token from Auth0 CLI: ${cliPath}`);
     
-    if (fs.existsSync(configPath)) {
-      try {
-        const configData = fs.readFileSync(configPath, 'utf8');
-        const configJson = JSON.parse(configData);
+    const token = execSync(`${cliPath} api get-token`, { encoding: 'utf8' }).trim();
+    if (token && token.length > 10) {
+      console.log(`✅ Found token from Auth0 CLI (length: ${token.length})`);
+      return token;
+    }
+  } catch (e) {
+    console.log(`Unable to get token from CLI: ${e.message}`);
+  }
+  
+  // Check auth0-cli config files
+  const configPaths = [
+    path.join(HOME_DIR, '.config', 'auth0', 'config.json'),
+    path.join(HOME_DIR, '.auth0', 'config.json')
+  ];
+  
+  for (const configPath of configPaths) {
+    try {
+      if (fs.existsSync(configPath)) {
+        console.log(`Checking ${configPath} for token...`);
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         
-        if (configJson.access_token) {
-          console.log(`✅ Found token in ${configPath}`);
-          return configJson.access_token;
+        if (config.default_tenant && config.tenants && config.tenants[config.default_tenant]) {
+          const tenant = config.tenants[config.default_tenant];
+          if (tenant.access_token) {
+            console.log(`✅ Found token in ${configPath}`);
+            return tenant.access_token;
+          }
         }
-      } catch (error) {
-        console.log(`Error reading config: ${error.message}`);
       }
-    } else {
-      console.log(`Config file not found at ${configPath}`);
+    } catch (e) {
+      console.log(`Error reading ${configPath}: ${e.message}`);
     }
   }
   
@@ -61,7 +129,8 @@ function createEnvFile(token) {
   }
   
   const envPath = path.join(__dirname, '.env');
-  const envContent = `AUTH0_TOKEN=${token}\nAUTH0_DOMAIN=dev-e6lvf4q7ybhifyfp.us.auth0.com\n`;
+  const auth0Domain = getAuth0Domain();
+  const envContent = `AUTH0_TOKEN=${token}\nAUTH0_DOMAIN=${auth0Domain}\n`;
   
   try {
     fs.writeFileSync(envPath, envContent);
@@ -85,7 +154,7 @@ function createSimpleWrapper() {
 NODE_PATH=\${NODE_PATH:-node}
 
 # Path to the server
-SERVER_PATH="\$(dirname "\$0")/dist/index.js"
+SERVER_PATH="\$(dirname "\$0")/../dist/index.js"
 
 # Use .env file if it exists
 if [ -f "\$(dirname "\$0")/.env" ]; then

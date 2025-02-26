@@ -2,93 +2,84 @@
 
 A Model Context Protocol (MCP) server implementation for integrating Auth0 Management API with Claude Desktop.
 
-## Overview
+## Quick Setup
 
-This server allows Claude to interact with your Auth0 tenant using the Auth0 Management API. It implements the MCP protocol to provide Claude with tools for listing applications, users, and more.
+### Prerequisites
 
-## Features
+- Node.js v18 or higher
+- Git
 
-- Secure authentication with Auth0 Management API
-- Tools for interacting with Auth0 resources
-- Detailed logging and error handling
-- Easy integration with Claude Desktop
+### Installation
 
-## Installation
+1. **Clone and build the Auth0 CLI with MCP support**:
+   ```bash
+   # Clone the Auth0 CLI with MCP support
+   git clone -b mcp-server https://github.com/auth0/auth0-cli.git
+   cd auth0-cli
+   
+   # Build the CLI
+   make build
+   
+   # Login to Auth0
+   ./auth0 login
+   ```
+
+2. **Clone and build the Auth0 MCP server**:
+   ```bash
+   # Clone the repository
+   git clone https://github.com/yourusername/auth0-mcp-server.git
+   cd auth0-mcp-server
+   
+   # Install dependencies
+   npm install
+   
+   # Automatically detect and configure Auth0 CLI path
+   npm run setup
+   
+   # Build the server
+   npm run build
+   ```
+
+3. **Configure Claude Desktop**:
+   ```bash
+   # From the auth0-cli directory
+   cd ../auth0-cli
+   ./auth0 mcp init
+   ```
+
+   This command configures Claude Desktop to use the Auth0 MCP server. It automatically manages the server process, so you don't need to run it manually.
+
+## Modes of Operation
+
+The server supports two modes when used with the Auth0 CLI:
+
+### Production Mode (Default)
+- Uses the global Auth0 CLI in your PATH
+- Minimal logging
+
+### Debug Mode
+- Uses a local Auth0 CLI path when available
+- More detailed logging
+- Enable by setting environment variable: `export AUTH0_MCP_DEBUG=true`
+
+## Troubleshooting
+
+If you encounter issues with the Auth0 CLI path:
+
+1. The `npm run setup` command automatically detects your Auth0 CLI path
+2. You can manually set the path: `export AUTH0_CLI_PATH=/path/to/auth0-cli/auth0`
+3. Run the validator to check your setup: `npm run utils:validate-env`
+
+## Testing
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/auth0-mcp-server.git
-cd auth0-mcp-server
-
-# Install dependencies
-npm install
-
-# Build the server
-npm run build
-```
-
-## Configuration
-
-The server uses Auth0 CLI for authentication. Make sure you have Auth0 CLI installed and configured:
-
-```bash
-# Install Auth0 CLI
-npm install -g auth0-cli
-
-# Login to Auth0
-auth0 login
-```
-
-Alternatively, you can provide credentials directly:
-
-```bash
-# Start the server with domain and token
-npm start -- your-tenant.auth0.com your-api-token
-```
-
-## Usage
-
-### Starting the server
-
-```bash
-# Start the server
-npm start
-```
-
-### Debugging
-
-```bash
-# Start with debug logging
-npm run debug-server
-```
-
-### Testing
-
-```bash
-# Run the connection test
+# Test the connection
 npm test
+
+# Test a specific tool call
+npm run test:tools
 ```
 
-## Directory Structure
+## Additional Information
 
-```
-.
-├── bin/                # Executable scripts
-├── dist/               # Compiled TypeScript output
-├── docs/               # Documentation
-├── examples/           # Example scripts
-├── logs/               # Log files
-├── src/                # Source code
-├── test/               # Test files
-└── utils/              # Utility scripts
-```
-
-## License
-
-ISC
-
-## Additional Documentation
-
-- [Simplified Usage](./SIMPLIFIED_USAGE.md)
-- [Troubleshooting](./TROUBLESHOOTING.md)
-- [Connection Plan](./CONNECTION_PLAN.md) 
+For more detailed information, check the documentation in the `docs` directory. 

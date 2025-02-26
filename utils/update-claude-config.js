@@ -17,7 +17,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOME_DIR = os.homedir();
 const CLAUDE_CONFIG_PATH = path.join(HOME_DIR, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
 const SIMPLE_SERVER_PATH = path.join(__dirname, 'simple-auth0-server.js');
-const NODE_PATH = process.env.NODE_PATH || '/Users/bharath/.nvm/versions/node/v20.18.2/bin/node';
+const NODE_PATH = process.env.NODE_PATH || 'node';
 
 // Main function
 async function updateConfig() {

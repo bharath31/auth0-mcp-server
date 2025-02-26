@@ -10,7 +10,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
@@ -218,8 +218,23 @@ function getAuth0Domain() {
     return process.env.AUTH0_DOMAIN;
   }
   
-  // Hardcoded fallback
-  return 'dev-e6lvf4q7ybhifyfp.us.auth0.com';
+  // Try to get from Auth0 CLI
+  try {
+    const cliPath = process.env.AUTH0_CLI_PATH || 'auth0';
+    const tenantInfo = execSync(`${cliPath} tenants list --json`, { encoding: 'utf8' });
+    const tenants = JSON.parse(tenantInfo);
+    
+    if (tenants && tenants.length > 0) {
+      const activeTenant = tenants.find(t => t.active) || tenants[0];
+      log(`Found tenant from CLI: ${activeTenant.name}`);
+      return activeTenant.name;
+    }
+  } catch (error) {
+    log(`Unable to get domain from CLI: ${error.message}`);
+  }
+  
+  // Default fallback
+  return 'your-tenant.auth0.com';
 }
 
 // Start the server
