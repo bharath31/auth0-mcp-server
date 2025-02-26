@@ -21,7 +21,7 @@ A Model Context Protocol (MCP) server implementation for integrating Auth0 Manag
    make build
    
    # Login to Auth0
-   ./auth0 login
+   ./out/auth0 login
    ```
 
 2. **Clone and build the Auth0 MCP server**:
@@ -43,8 +43,7 @@ A Model Context Protocol (MCP) server implementation for integrating Auth0 Manag
 3. **Configure Claude Desktop**:
    ```bash
    # From the auth0-cli directory
-   cd ../auth0-cli
-   ./auth0 mcp init
+   ./out/auth0 mcp init
    ```
 
    This command configures Claude Desktop to use the Auth0 MCP server. It automatically manages the server process, so you don't need to run it manually.
