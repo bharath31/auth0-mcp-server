@@ -98,6 +98,20 @@ export const APPLICATION_TOOLS: Tool[] = [
       },
       required: ['client_id']
     }
+  },
+  {
+    name: 'auth0_search_applications',
+    description: 'Search for Auth0 applications by name',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name or partial name to search for' },
+        page: { type: 'number', description: 'Page number (0-based)' },
+        per_page: { type: 'number', description: 'Number of applications per page' },
+        include_totals: { type: 'boolean', description: 'Include total count' }
+      },
+      required: ['name']
+    }
   }
 ];
 
@@ -237,6 +251,15 @@ export const APPLICATION_HANDLERS: Record<string, (request: HandlerRequest, conf
         if (totalPages > 1) {
           resultText += `\n*Page ${page+1} of ${totalPages} (${perPage} items per page)*`;
           resultText += '\n\nTo see more results, use: `auth0_list_applications(page=${nextPage})`';
+        }
+        
+        // For auth0_list_applications, add a clearer section after the table
+        if (applications.length > 0) {
+          resultText += '\n### Client IDs for Reference\n\n';
+          applications.forEach(app => {
+            const clientId = 'client_id' in app ? app.client_id : app.id;
+            resultText += `- **${app.name}**: \`${clientId}\`\n`;
+          });
         }
         
         return {
@@ -632,6 +655,187 @@ export const APPLICATION_HANDLERS: Record<string, (request: HandlerRequest, conf
         resultText += `Application with client_id '${clientId}' has been deleted.`;
         
         log(`Successfully deleted application with client_id: ${clientId}`);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: resultText
+            }],
+            isError: false
+          }
+        };
+      } catch (fetchError: any) {
+        // Handle network-specific errors
+        const errorMessage = handleNetworkError(fetchError);
+        
+        return createErrorResponse(errorMessage);
+      }
+    } catch (error: any) {
+      // Handle any other errors
+      log('Error processing request:', error);
+      
+      return createErrorResponse(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  },
+  auth0_search_applications: async (request: HandlerRequest, config: HandlerConfig): Promise<HandlerResponse> => {
+    try {
+      if (!config.domain) {
+        log('Error: AUTH0_DOMAIN environment variable is not set');
+        return createErrorResponse('Error: AUTH0_DOMAIN environment variable is not set');
+      }
+
+      const searchName = request.parameters.name;
+      if (!searchName) {
+        return createErrorResponse('Error: name parameter is required');
+      }
+
+      // Ensure domain is properly formatted
+      const domain = formatDomain(config.domain);
+      
+      // Build query parameters
+      const params = new URLSearchParams();
+      
+      // Add search query with a more compatible format
+      if (searchName.includes(' ') || /[^a-zA-Z0-9]/.test(searchName)) {
+        // If the search name contains spaces or special characters, use exact match
+        params.append('q', `name:"${searchName.replace(/"/g, '\\"')}"`);
+      } else {
+        // For simple terms, use a prefix search
+        params.append('q', `name:${searchName}*`);
+      }
+
+      // Make sure we're using the right search engine
+      params.append('search_engine', 'v3');
+      
+      if (request.parameters.page !== undefined) {
+        params.append('page', request.parameters.page.toString());
+      }
+      
+      if (request.parameters.per_page !== undefined) {
+        params.append('per_page', request.parameters.per_page.toString());
+      } else {
+        // Default to 10 applications per page
+        params.append('per_page', '10');
+      }
+      
+      if (request.parameters.include_totals !== undefined) {
+        params.append('include_totals', request.parameters.include_totals.toString());
+      } else {
+        // Default to include totals
+        params.append('include_totals', 'true');
+      }
+
+      // Full URL for debugging
+      const apiUrl = `https://${domain}/api/v2/clients?${params.toString()}`;
+      log(`Making API request to ${apiUrl}`);
+      
+      try {
+        // Make API request to Auth0 Management API with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(apiUrl, {
+          headers: {
+            'Authorization': `Bearer ${request.token}`,
+            'Content-Type': 'application/json'
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          log(`API request failed with status ${response.status}: ${errorText}`);
+          
+          let errorMessage = `Failed to search applications: ${response.status} ${response.statusText}`;
+          
+          if (response.status === 401) {
+            errorMessage += '\nError: Unauthorized. Your token might be expired or invalid or missing read:clients scope.';
+          }
+          
+          return createErrorResponse(errorMessage);
+        }
+        
+        // Parse the response
+        const responseData = await response.json() as unknown;
+        
+        // Handle different response formats
+        let applications: Auth0Application[] = [];
+        let total = 0;
+        let page = 0;
+        let perPage = 10;
+        
+        if (Array.isArray(responseData)) {
+          // Simple array response
+          applications = responseData as Auth0Application[];
+          total = applications.length;
+        } else if (typeof responseData === 'object' && responseData !== null && 
+                   'clients' in responseData && Array.isArray((responseData as any).clients)) {
+          // Paginated response with totals
+          applications = (responseData as any).clients;
+          total = (responseData as any).total || applications.length;
+          page = (responseData as any).page || 0;
+          perPage = (responseData as any).per_page || applications.length;
+        } else {
+          log('Invalid response format:', responseData);
+          return createErrorResponse('Error: Received invalid response format from Auth0 API.');
+        }
+        
+        if (applications.length === 0) {
+          return {
+            toolResult: {
+              content: [{
+                type: 'text',
+                text: `No applications found matching the name "${searchName}".`
+              }],
+              isError: false
+            }
+          };
+        }
+        
+        // Format applications in a readable way
+        let resultText = `### Auth0 Applications Matching "${searchName}" (${applications.length}${total > applications.length ? ' of ' + total : ''})\n\n`;
+        resultText += '| Name | Client ID | Type | Description |\n';
+        resultText += '|------|-----------|------|-------------|\n';
+        
+        applications.forEach(app => {
+          const name = app.name || 'Unnamed Application';
+          const clientId = app.client_id || '-';
+          const appType = app.app_type || '-';
+          const description = app.description || '-';
+          
+          resultText += `| ${name} | ${clientId} | ${appType} | ${description} |\n`;
+        });
+        
+        // Add pagination info if there are more applications
+        if (applications.length < total) {
+          const totalPages = Math.ceil(total / perPage);
+          const nextPage = page + 1 < totalPages ? page + 1 : 0;
+          
+          resultText += `\n*Page ${page+1} of ${totalPages} (${perPage} items per page, ${total} total)*\n`;
+          
+          if (nextPage > 0) {
+            resultText += `\nTo see more results, use: \`auth0_search_applications(name="${searchName}", page=${nextPage})\`\n`;
+          }
+        }
+        
+        // Add note about viewing details
+        if (applications.length > 0) {
+          resultText += `\nTo view details of a specific application, use: \`auth0_get_application(client_id="client_id")\`\n`;
+        }
+        
+        // For auth0_search_applications, add a similar section
+        if (applications.length > 0) {
+          resultText += '\n### Client IDs for Reference\n\n';
+          applications.forEach(app => {
+            const name = app.name || 'Unnamed Application';
+            resultText += `- **${name}**: \`${app.client_id}\`\n`;
+          });
+        }
+        
+        log(`Successfully found ${applications.length} applications matching "${searchName}"`);
         
         return {
           toolResult: {

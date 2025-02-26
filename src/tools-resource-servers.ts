@@ -258,6 +258,13 @@ export const RESOURCE_SERVER_HANDLERS: Record<string, (request: HandlerRequest, 
           resultText += '\n\nTo see more results, use: `auth0_list_resource_servers(page=${nextPage})`';
         }
         
+        if (resourceServers.length > 0) {
+          resultText += '\n### Resource Server IDs for Reference\n\n';
+          resourceServers.forEach(rs => {
+            resultText += `- **${rs.name}**: \`${rs.id}\`\n`;
+          });
+        }
+        
         return {
           toolResult: {
             content: [{

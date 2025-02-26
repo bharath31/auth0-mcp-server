@@ -292,6 +292,13 @@ export const ACTION_HANDLERS: Record<string, (request: HandlerRequest, config: H
           resultText += '\n\nTo see more results, use: `auth0_list_actions(page=${nextPage})`';
         }
         
+        if (actions.length > 0) {
+          resultText += '\n### Action IDs for Reference\n\n';
+          actions.forEach(action => {
+            resultText += `- **${action.name}**: \`${action.id}\`\n`;
+          });
+        }
+        
         return {
           toolResult: {
             content: [{

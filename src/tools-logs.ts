@@ -229,6 +229,15 @@ export const LOG_HANDLERS: Record<string, (request: HandlerRequest, config: Hand
           resultText += `\nTo view details of a specific log, use: \`auth0_get_log(id="log_id")\`\n`;
         }
         
+        // Add Log IDs for Reference
+        if (logs.length > 0) {
+          resultText += '\n### Log IDs for Reference\n\n';
+          logs.forEach(logEntry => {
+            const date = new Date(logEntry.date).toLocaleString();
+            resultText += `- **${date} (${logEntry.type})**: \`${logEntry._id}\`\n`;
+          });
+        }
+        
         log(`Successfully retrieved ${logs.length} logs`);
         
         return {
