@@ -40,6 +40,21 @@ export interface HandlerResponse {
   toolResult: ToolResult;
 }
 
+// Auth0 response interfaces
+interface Auth0Application {
+  client_id: string;
+  name: string;
+  [key: string]: any;
+}
+
+interface Auth0PaginatedResponse {
+  clients?: Auth0Application[];
+  total?: number;
+  page?: number;
+  per_page?: number;
+  [key: string]: any;
+}
+
 // Define all available tools
 export const TOOLS: Tool[] = [
   {
@@ -154,7 +169,7 @@ export const HANDLERS: Record<string, (request: HandlerRequest, config: HandlerC
           };
         }
 
-        const applications = await response.json();
+        const applications = await response.json() as Auth0Application[] | Auth0PaginatedResponse;
         log(`Successfully retrieved ${Array.isArray(applications) ? applications.length : 'unknown'} applications`);
         
         // Format the response in a more user-friendly way
@@ -168,7 +183,8 @@ export const HANDLERS: Record<string, (request: HandlerRequest, config: HandlerC
             total: applications.total,
             page: applications.page,
             per_page: applications.per_page,
-            total_pages: Math.ceil(applications.total / applications.per_page)
+            total_pages: applications.total && applications.per_page ? 
+              Math.ceil(applications.total / applications.per_page) : 1
           };
         } else {
           result = applications;

@@ -128,7 +128,8 @@ export const HANDLERS = {
                         total: applications.total,
                         page: applications.page,
                         per_page: applications.per_page,
-                        total_pages: Math.ceil(applications.total / applications.per_page)
+                        total_pages: applications.total && applications.per_page ?
+                            Math.ceil(applications.total / applications.per_page) : 1
                     };
                 }
                 else {

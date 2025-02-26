@@ -67,18 +67,18 @@ export async function startServer() {
           log('Successfully reloaded configuration');
         }
         
-        // Add auth token to request
-        const requestWithToken = {
+          // Add auth token to request
+          const requestWithToken = {
           token: config.token,
           parameters: request.params.parameters || {}
-        };
-        
-        // Execute handler
-        log(`Executing handler for tool: ${toolName}`);
+          };
+          
+          // Execute handler
+          log(`Executing handler for tool: ${toolName}`);
         const result = await HANDLERS[toolName](requestWithToken, { domain: config.domain });
-        log(`Handler execution completed for: ${toolName}`);
-        
-        return {
+          log(`Handler execution completed for: ${toolName}`);
+          
+          return {
           toolResult: result.toolResult
         };
       } catch (error) {
