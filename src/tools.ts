@@ -84,6 +84,78 @@ export const TOOLS: Tool[] = [
         include_totals: { type: 'boolean', description: 'Include total count' }
       }
     }
+  },
+  {
+    name: 'auth0_get_application',
+    description: 'Get details about a specific Auth0 application',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'Client ID of the application to retrieve' }
+      },
+      required: ['client_id']
+    }
+  },
+  {
+    name: 'auth0_create_application',
+    description: 'Create a new Auth0 application',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the application' },
+        app_type: { 
+          type: 'string', 
+          description: 'Type of application (native, spa, regular_web, non_interactive)',
+          enum: ['native', 'spa', 'regular_web', 'non_interactive']
+        },
+        description: { type: 'string', description: 'Description of the application' },
+        callbacks: { 
+          type: 'array', 
+          items: { type: 'string' },
+          description: 'Allowed callback URLs' 
+        },
+        allowed_origins: { 
+          type: 'array', 
+          items: { type: 'string' },
+          description: 'Allowed origins for CORS' 
+        }
+      },
+      required: ['name', 'app_type']
+    }
+  },
+  {
+    name: 'auth0_update_application',
+    description: 'Update an existing Auth0 application',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'Client ID of the application to update' },
+        name: { type: 'string', description: 'New name of the application' },
+        description: { type: 'string', description: 'New description of the application' },
+        callbacks: { 
+          type: 'array', 
+          items: { type: 'string' },
+          description: 'New allowed callback URLs' 
+        },
+        allowed_origins: { 
+          type: 'array', 
+          items: { type: 'string' },
+          description: 'New allowed origins for CORS' 
+        }
+      },
+      required: ['client_id']
+    }
+  },
+  {
+    name: 'auth0_delete_application',
+    description: 'Delete an Auth0 application',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        client_id: { type: 'string', description: 'Client ID of the application to delete' }
+      },
+      required: ['client_id']
+    }
   }
 ];
 
@@ -263,6 +335,565 @@ export const HANDLERS: Record<string, (request: HandlerRequest, config: HandlerC
         httpLog(`Network error: ${fetchError.message || fetchError}`);
         httpLog('Error details:', fetchError);
         
+        const errorMessage = handleNetworkError(fetchError);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: errorMessage
+            }],
+            isError: true
+          }
+        };
+      }
+    } catch (error: any) {
+      // Handle any other errors
+      log('Error processing request:', error);
+      
+      return {
+        toolResult: {
+          content: [{
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        }
+      };
+    }
+  },
+  auth0_get_application: async (request: HandlerRequest, config: HandlerConfig): Promise<HandlerResponse> => {
+    try {
+      if (!config.domain) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: AUTH0_DOMAIN environment variable is not set'
+            }],
+            isError: true
+          }
+        };
+      }
+
+      const clientId = request.parameters.client_id;
+      if (!clientId) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: client_id is required'
+            }],
+            isError: true
+          }
+        };
+      }
+
+      // Ensure domain is properly formatted
+      const domain = config.domain.includes('.') ? config.domain : `${config.domain}.us.auth0.com`;
+      
+      // API URL for getting an application
+      const apiUrl = `https://${domain}/api/v2/clients/${clientId}`;
+      log(`Making API request to ${apiUrl}`);
+      
+      try {
+        // Make API request to Auth0 Management API
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(apiUrl, {
+          headers: {
+            'Authorization': `Bearer ${request.token}`,
+            'Content-Type': 'application/json'
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          log(`API request failed with status ${response.status}: ${errorText}`);
+          
+          let errorMessage = `Failed to get application: ${response.status} ${response.statusText}`;
+          
+          if (response.status === 404) {
+            errorMessage = `Application with client_id '${clientId}' not found.`;
+          } else if (response.status === 401) {
+            errorMessage += '\nError: Unauthorized. Your token might be expired or invalid or missing read:clients scope.';
+          }
+          
+          return {
+            toolResult: {
+              content: [{
+                type: 'text',
+                text: errorMessage
+              }],
+              isError: true
+            }
+          };
+        }
+        
+        // Parse the response
+        const application = await response.json() as Auth0Application;
+        
+        // Format application details in markdown
+        let resultText = `### Application: ${application.name}\n\n`;
+        resultText += `- **Client ID**: ${application.client_id}\n`;
+        resultText += `- **Type**: ${application.app_type || 'Not specified'}\n`;
+        resultText += `- **Description**: ${application.description || 'No description'}\n\n`;
+        
+        if (application.client_secret) {
+          resultText += `- **Client Secret**: \`${application.client_secret}\`\n\n`;
+        }
+        
+        if (application.callbacks && application.callbacks.length) {
+          resultText += `#### Callback URLs\n\n`;
+          application.callbacks.forEach((url: string) => {
+            resultText += `- ${url}\n`;
+          });
+          resultText += '\n';
+        }
+        
+        if (application.allowed_origins && application.allowed_origins.length) {
+          resultText += `#### Allowed Origins\n\n`;
+          application.allowed_origins.forEach((url: string) => {
+            resultText += `- ${url}\n`;
+          });
+          resultText += '\n';
+        }
+        
+        log(`Successfully retrieved application: ${application.name} (${application.client_id})`);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: resultText
+            }],
+            isError: false
+          }
+        };
+      } catch (fetchError: any) {
+        // Handle network-specific errors
+        const errorMessage = handleNetworkError(fetchError);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: errorMessage
+            }],
+            isError: true
+          }
+        };
+      }
+    } catch (error: any) {
+      // Handle any other errors
+      log('Error processing request:', error);
+      
+      return {
+        toolResult: {
+          content: [{
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        }
+      };
+    }
+  },
+  auth0_create_application: async (request: HandlerRequest, config: HandlerConfig): Promise<HandlerResponse> => {
+    try {
+      if (!config.domain) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: AUTH0_DOMAIN environment variable is not set'
+            }],
+            isError: true
+          }
+        };
+      }
+
+      const { name, app_type, description, callbacks, allowed_origins } = request.parameters;
+      
+      if (!name) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: name is required'
+            }],
+            isError: true
+          }
+        };
+      }
+      
+      if (!app_type) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: app_type is required'
+            }],
+            isError: true
+          }
+        };
+      }
+      
+      // Ensure domain is properly formatted
+      const domain = config.domain.includes('.') ? config.domain : `${config.domain}.us.auth0.com`;
+      
+      // API URL for creating an application
+      const apiUrl = `https://${domain}/api/v2/clients`;
+      log(`Making API request to ${apiUrl}`);
+      
+      // Prepare request body
+      const requestBody = {
+        name,
+        app_type,
+        description,
+        callbacks,
+        allowed_origins
+      };
+      
+      try {
+        // Make API request to Auth0 Management API
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${request.token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          log(`API request failed with status ${response.status}: ${errorText}`);
+          
+          let errorMessage = `Failed to create application: ${response.status} ${response.statusText}`;
+          
+          if (response.status === 401) {
+            errorMessage += '\nError: Unauthorized. Your token might be expired or invalid or missing create:clients scope.';
+          } else if (response.status === 422) {
+            errorMessage += '\nError: Validation errors in your request. Check that your parameters are valid.';
+          }
+          
+          return {
+            toolResult: {
+              content: [{
+                type: 'text',
+                text: errorMessage
+              }],
+              isError: true
+            }
+          };
+        }
+        
+        // Parse the response
+        const newApplication = await response.json() as Auth0Application;
+        
+        // Format application details in markdown
+        let resultText = `### Application Created Successfully\n\n`;
+        resultText += `- **Name**: ${newApplication.name}\n`;
+        resultText += `- **Client ID**: ${newApplication.client_id}\n`;
+        resultText += `- **Type**: ${newApplication.app_type || 'Not specified'}\n`;
+        resultText += `- **Description**: ${newApplication.description || 'No description'}\n\n`;
+        
+        if (newApplication.client_secret) {
+          resultText += `- **Client Secret**: \`${newApplication.client_secret}\`\n\n`;
+          resultText += `⚠️ **Important**: Save the client secret as it won't be accessible again.\n\n`;
+        }
+        
+        if (newApplication.callbacks && newApplication.callbacks.length) {
+          resultText += `#### Callback URLs\n\n`;
+          newApplication.callbacks.forEach((url: string) => {
+            resultText += `- ${url}\n`;
+          });
+          resultText += '\n';
+        }
+        
+        log(`Successfully created application: ${newApplication.name} (${newApplication.client_id})`);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: resultText
+            }],
+            isError: false
+          }
+        };
+      } catch (fetchError: any) {
+        // Handle network-specific errors
+        const errorMessage = handleNetworkError(fetchError);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: errorMessage
+            }],
+            isError: true
+          }
+        };
+      }
+    } catch (error: any) {
+      // Handle any other errors
+      log('Error processing request:', error);
+      
+      return {
+        toolResult: {
+          content: [{
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        }
+      };
+    }
+  },
+  auth0_update_application: async (request: HandlerRequest, config: HandlerConfig): Promise<HandlerResponse> => {
+    try {
+      if (!config.domain) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: AUTH0_DOMAIN environment variable is not set'
+            }],
+            isError: true
+          }
+        };
+      }
+
+      const clientId = request.parameters.client_id;
+      if (!clientId) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: client_id is required'
+            }],
+            isError: true
+          }
+        };
+      }
+      
+      // Extract other parameters to update
+      const { name, description, callbacks, allowed_origins } = request.parameters;
+      
+      // Prepare update body, only including fields that are present
+      const updateBody: Record<string, any> = {};
+      if (name !== undefined) updateBody.name = name;
+      if (description !== undefined) updateBody.description = description;
+      if (callbacks !== undefined) updateBody.callbacks = callbacks;
+      if (allowed_origins !== undefined) updateBody.allowed_origins = allowed_origins;
+      
+      // Ensure domain is properly formatted
+      const domain = config.domain.includes('.') ? config.domain : `${config.domain}.us.auth0.com`;
+      
+      // API URL for updating an application
+      const apiUrl = `https://${domain}/api/v2/clients/${clientId}`;
+      log(`Making API request to ${apiUrl}`);
+      
+      try {
+        // Make API request to Auth0 Management API
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(apiUrl, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${request.token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(updateBody),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          log(`API request failed with status ${response.status}: ${errorText}`);
+          
+          let errorMessage = `Failed to update application: ${response.status} ${response.statusText}`;
+          
+          if (response.status === 404) {
+            errorMessage = `Application with client_id '${clientId}' not found.`;
+          } else if (response.status === 401) {
+            errorMessage += '\nError: Unauthorized. Your token might be expired or invalid or missing update:clients scope.';
+          }
+          
+          return {
+            toolResult: {
+              content: [{
+                type: 'text',
+                text: errorMessage
+              }],
+              isError: true
+            }
+          };
+        }
+        
+        // Parse the response
+        const updatedApplication = await response.json() as Auth0Application;
+        
+        // Format application details in markdown
+        let resultText = `### Application Updated Successfully\n\n`;
+        resultText += `- **Name**: ${updatedApplication.name}\n`;
+        resultText += `- **Client ID**: ${updatedApplication.client_id}\n`;
+        resultText += `- **Type**: ${updatedApplication.app_type || 'Not specified'}\n`;
+        resultText += `- **Description**: ${updatedApplication.description || 'No description'}\n\n`;
+        
+        if (updatedApplication.callbacks && updatedApplication.callbacks.length) {
+          resultText += `#### Callback URLs\n\n`;
+          updatedApplication.callbacks.forEach((url: string) => {
+            resultText += `- ${url}\n`;
+          });
+          resultText += '\n';
+        }
+        
+        log(`Successfully updated application: ${updatedApplication.name} (${updatedApplication.client_id})`);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: resultText
+            }],
+            isError: false
+          }
+        };
+      } catch (fetchError: any) {
+        // Handle network-specific errors
+        const errorMessage = handleNetworkError(fetchError);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: errorMessage
+            }],
+            isError: true
+          }
+        };
+      }
+    } catch (error: any) {
+      // Handle any other errors
+      log('Error processing request:', error);
+      
+      return {
+        toolResult: {
+          content: [{
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        }
+      };
+    }
+  },
+  auth0_delete_application: async (request: HandlerRequest, config: HandlerConfig): Promise<HandlerResponse> => {
+    try {
+      if (!config.domain) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: AUTH0_DOMAIN environment variable is not set'
+            }],
+            isError: true
+          }
+        };
+      }
+
+      const clientId = request.parameters.client_id;
+      if (!clientId) {
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: 'Error: client_id is required'
+            }],
+            isError: true
+          }
+        };
+      }
+
+      // Ensure domain is properly formatted
+      const domain = config.domain.includes('.') ? config.domain : `${config.domain}.us.auth0.com`;
+      
+      // API URL for deleting an application
+      const apiUrl = `https://${domain}/api/v2/clients/${clientId}`;
+      log(`Making API request to ${apiUrl}`);
+      
+      try {
+        // Make API request to Auth0 Management API
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(apiUrl, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${request.token}`,
+            'Content-Type': 'application/json'
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          log(`API request failed with status ${response.status}: ${errorText}`);
+          
+          let errorMessage = `Failed to delete application: ${response.status} ${response.statusText}`;
+          
+          if (response.status === 404) {
+            errorMessage = `Application with client_id '${clientId}' not found.`;
+          } else if (response.status === 401) {
+            errorMessage += '\nError: Unauthorized. Your token might be expired or invalid or missing delete:clients scope.';
+          }
+          
+          return {
+            toolResult: {
+              content: [{
+                type: 'text',
+                text: errorMessage
+              }],
+              isError: true
+            }
+          };
+        }
+        
+        // Delete operations typically return 204 No Content
+        let resultText = `### Application Deleted Successfully\n\n`;
+        resultText += `Application with client_id '${clientId}' has been deleted.`;
+        
+        log(`Successfully deleted application with client_id: ${clientId}`);
+        
+        return {
+          toolResult: {
+            content: [{
+              type: 'text',
+              text: resultText
+            }],
+            isError: false
+          }
+        };
+      } catch (fetchError: any) {
+        // Handle network-specific errors
         const errorMessage = handleNetworkError(fetchError);
         
         return {
