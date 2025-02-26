@@ -192,24 +192,32 @@ export const ACTION_HANDLERS: Record<string, (request: HandlerRequest, config: H
       // Ensure domain is properly formatted
       const domain = formatDomain(config.domain);
       
-      // Build query parameters
+      // Build query parameters - Fix parameter names to match Auth0 API requirements
       const params = new URLSearchParams();
+      
+      // Check Auth0 API docs for correct parameter names
       if (request.parameters.page !== undefined) {
         params.append('page', request.parameters.page.toString());
       }
+      
       if (request.parameters.per_page !== undefined) {
         params.append('per_page', request.parameters.per_page.toString());
       } else {
         // Default to 5 items per page
         params.append('per_page', '5');
       }
+      
+      // The parameter name should be include_totals, not include_total
       if (request.parameters.include_totals !== undefined) {
         params.append('include_totals', request.parameters.include_totals.toString());
       } else {
         // Default to include totals
         params.append('include_totals', 'true');
       }
+      
+      // The parameter name should be triggerId, not trigger_id
       if (request.parameters.trigger_id) {
+        // This might be the issue - check Auth0 API docs for correct parameter name
         params.append('triggerId', request.parameters.trigger_id);
       }
 
@@ -217,12 +225,17 @@ export const ACTION_HANDLERS: Record<string, (request: HandlerRequest, config: H
       const apiUrl = `https://${domain}/api/v2/actions/actions?${params.toString()}`;
       log(`Making API request to ${apiUrl}`);
       
+      // Try a simpler request first to debug
+      const simpleApiUrl = `https://${domain}/api/v2/actions/actions`;
+      log(`Making simplified API request to ${simpleApiUrl}`);
+      
       try {
         // Make API request to Auth0 Management API with timeout
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         
-        const response = await fetch(apiUrl, {
+        // Try with a simpler request first
+        const response = await fetch(simpleApiUrl, {
           headers: {
             'Authorization': `Bearer ${request.token}`,
             'Content-Type': 'application/json',
@@ -239,57 +252,96 @@ export const ACTION_HANDLERS: Record<string, (request: HandlerRequest, config: H
           
           let errorMessage = `Failed to list actions: ${response.status} ${response.statusText}`;
           
-          // Add more context based on common error codes
           if (response.status === 401) {
-            errorMessage += '\nError: Unauthorized. Your token might be expired or invalid. Try running "auth0 login" to refresh your token.';
-          } else if (response.status === 403) {
-            errorMessage += '\nError: Forbidden. Your token might not have the required scopes (read:actions). Try running "auth0 login --scopes read:actions" to get the proper permissions.';
+            errorMessage += '\nError: Unauthorized. Your token might be expired or invalid or missing read:actions scope.';
+          } else if (response.status === 400) {
+            // Log more details about the 400 error
+            errorMessage += `\nError: Bad Request. Details: ${errorText}`;
+            log('Request URL was:', simpleApiUrl);
+            log('Request headers:', {
+              'Authorization': 'Bearer [token redacted]',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            });
           }
           
           return createErrorResponse(errorMessage);
         }
         
         // Parse the response
-        const responseData = await response.json() as Auth0PaginatedActionsResponse;
+        const responseData = await response.json() as unknown;
+        log('Response data:', JSON.stringify(responseData).substring(0, 200) + '...');
         
-        if (!responseData.actions || !Array.isArray(responseData.actions)) {
-          log('Invalid response format - missing actions array');
-          log('Response data:', responseData);
-          
-          return createErrorResponse('Error: Received invalid response format from Auth0 API. The "actions" array is missing or invalid.');
+        // Handle different response formats
+        let actions: Auth0Action[] = [];
+        let total = 0;
+        let page = 0;
+        let perPage = 5;
+        
+        if (Array.isArray(responseData)) {
+          // Simple array response
+          actions = responseData as Auth0Action[];
+          total = actions.length;
+        } else if (typeof responseData === 'object' && responseData !== null) {
+          // Check if it has an 'actions' property that is an array
+          if ('actions' in responseData && Array.isArray((responseData as any).actions)) {
+            actions = (responseData as any).actions;
+            total = (responseData as any).total || actions.length;
+            page = (responseData as any).page || 0;
+            perPage = (responseData as any).per_page || actions.length;
+          } else {
+            // Log the actual structure to help debug
+            log('Response structure:', Object.keys(responseData));
+            return createErrorResponse('Error: Unexpected response format from Auth0 API. Missing actions array.');
+          }
+        } else {
+          log('Invalid response format:', responseData);
+          return createErrorResponse('Error: Received invalid response format from Auth0 API.');
         }
         
-        // Format actions list
-        const actions = responseData.actions.map(action => ({
-          id: action.id,
-          name: action.name,
-          trigger: action.supported_triggers?.[0]?.id || 'Unknown',
-          status: action.status || 'Unknown',
-          runtime: action.runtime || 'Unknown'
-        }));
+        if (actions.length === 0) {
+          return {
+            toolResult: {
+              content: [{
+                type: 'text',
+                text: 'No actions found in your Auth0 tenant.'
+              }],
+              isError: false
+            }
+          };
+        }
         
-        // Get pagination info
-        const total = responseData.total || actions.length;
-        const page = responseData.page !== undefined ? responseData.page : 0;
-        const perPage = responseData.per_page || actions.length;
-        const totalPages = Math.ceil(total / perPage);
-        const nextPage = page + 1 < totalPages ? page + 1 : 0;
-        
-        log(`Successfully retrieved ${actions.length} actions (page ${page+1} of ${totalPages}, total: ${total})`);
-        
-        // Create table format
-        let resultText = `### Auth0 Actions (${actions.length}/${total})\n\n`;
+        // Format actions in a readable way
+        let resultText = `### Auth0 Actions (${actions.length}${total > actions.length ? ' of ' + total : ''})\n\n`;
         resultText += '| Name | Trigger | Status | Runtime |\n';
         resultText += '|------|---------|--------|--------|\n';
         
         actions.forEach(action => {
-          resultText += `| ${action.name} | ${action.trigger} | ${action.status} | ${action.runtime} |\n`;
+          const name = action.name || 'Unnamed Action';
+          const trigger = action.supported_triggers && action.supported_triggers.length > 0 
+            ? action.supported_triggers[0].id 
+            : '-';
+          const status = action.status || '-';
+          const runtime = action.runtime || '-';
+          
+          resultText += `| ${name} | ${trigger} | ${status} | ${runtime} |\n`;
         });
         
-        // Add pagination info
-        if (totalPages > 1) {
-          resultText += `\n*Page ${page+1} of ${totalPages} (${perPage} items per page)*`;
-          resultText += '\n\nTo see more results, use: `auth0_list_actions(page=${nextPage})`';
+        // Add pagination info if there are more actions
+        if (actions.length < total) {
+          const totalPages = Math.ceil(total / perPage);
+          const nextPage = page + 1 < totalPages ? page + 1 : 0;
+          
+          resultText += `\n*Page ${page+1} of ${totalPages} (${perPage} items per page, ${total} total)*\n`;
+          
+          if (nextPage > 0) {
+            resultText += `\nTo see more results, use: \`auth0_list_actions(page=${nextPage})\`\n`;
+          }
+        }
+        
+        // Add note about viewing details
+        if (actions.length > 0) {
+          resultText += `\nTo view details of a specific action, use: \`auth0_get_action(id="action_id")\`\n`;
         }
         
         if (actions.length > 0) {
@@ -298,6 +350,8 @@ export const ACTION_HANDLERS: Record<string, (request: HandlerRequest, config: H
             resultText += `- **${action.name}**: \`${action.id}\`\n`;
           });
         }
+        
+        log(`Successfully retrieved ${actions.length} actions`);
         
         return {
           toolResult: {
@@ -310,9 +364,7 @@ export const ACTION_HANDLERS: Record<string, (request: HandlerRequest, config: H
         };
       } catch (fetchError: any) {
         // Handle network-specific errors
-        httpLog(`Network error: ${fetchError.message || fetchError}`);
-        httpLog('Error details:', fetchError);
-        
+        log('Fetch error:', fetchError);
         const errorMessage = handleNetworkError(fetchError);
         
         return createErrorResponse(errorMessage);
