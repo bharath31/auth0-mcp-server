@@ -15,10 +15,18 @@ debug.log = (...args) => {
   return true;
 };
 
+// Enable additional debug for stdio transport
+process.env.DEBUG = (process.env.DEBUG || '') + ',auth0-mcp:*,mcp:transport:*';
+
 // Server implementation
 export async function startServer() {
   try {
     log('Initializing Auth0 MCP server...');
+    
+    // Log node version
+    log(`Node.js version: ${process.version}`);
+    log(`Process ID: ${process.pid}`);
+    log(`Platform: ${process.platform} (${process.arch})`);
     
     // Load configuration
     let config = await loadConfig();
@@ -67,18 +75,18 @@ export async function startServer() {
           log('Successfully reloaded configuration');
         }
         
-          // Add auth token to request
-          const requestWithToken = {
+        // Add auth token to request
+        const requestWithToken = {
           token: config.token,
-          parameters: request.params.parameters || {}
-          };
-          
-          // Execute handler
-          log(`Executing handler for tool: ${toolName}`);
+          parameters: request.params.arguments || {}
+        };
+        
+        // Execute handler
+        log(`Executing handler for tool: ${toolName}`);
         const result = await HANDLERS[toolName](requestWithToken, { domain: config.domain });
-          log(`Handler execution completed for: ${toolName}`);
-          
-          return {
+        log(`Handler execution completed for: ${toolName}`);
+        
+        return {
           toolResult: result.toolResult
         };
       } catch (error) {
@@ -101,11 +109,28 @@ export async function startServer() {
     log('Creating stdio transport...');
     const transport = new StdioServerTransport();
     
-    log('Connecting server to transport...');
-    await server.connect(transport);
+    // Additional transport diagnostics
+    log('Checking stdio streams:');
+    log(`- process.stdin.isTTY: ${process.stdin.isTTY}`);
+    log(`- process.stdout.isTTY: ${process.stdout.isTTY}`);
+    log(`- process.stderr.isTTY: ${process.stderr.isTTY}`);
     
-    log('Server connected and running');
-    return server;
+    // Connection with timeout
+    log('Connecting server to transport...');
+    try {
+      await Promise.race([
+        server.connect(transport),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 5000))
+      ]);
+      log('Server connected and running');
+      return server;
+    } catch (connectError) {
+      log(`Transport connection error: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
+      if (connectError instanceof Error && connectError.message === 'Connection timeout') {
+        log('Connection to transport timed out. This might indicate an issue with the stdio transport.');
+      }
+      throw connectError;
+    }
   } catch (error) {
     log('Error starting server:', error);
     throw error;

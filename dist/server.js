@@ -12,10 +12,16 @@ debug.log = (...args) => {
     process.stderr.write(msg + '\n');
     return true;
 };
+// Enable additional debug for stdio transport
+process.env.DEBUG = (process.env.DEBUG || '') + ',auth0-mcp:*,mcp:transport:*';
 // Server implementation
 export async function startServer() {
     try {
         log('Initializing Auth0 MCP server...');
+        // Log node version
+        log(`Node.js version: ${process.version}`);
+        log(`Process ID: ${process.pid}`);
+        log(`Platform: ${process.platform} (${process.arch})`);
         // Load configuration
         let config = await loadConfig();
         if (!validateConfig(config)) {
@@ -53,7 +59,7 @@ export async function startServer() {
                 // Add auth token to request
                 const requestWithToken = {
                     token: config.token,
-                    parameters: request.params.parameters || {}
+                    parameters: request.params.arguments || {}
                 };
                 // Execute handler
                 log(`Executing handler for tool: ${toolName}`);
@@ -81,10 +87,28 @@ export async function startServer() {
         // Connect to transport
         log('Creating stdio transport...');
         const transport = new StdioServerTransport();
+        // Additional transport diagnostics
+        log('Checking stdio streams:');
+        log(`- process.stdin.isTTY: ${process.stdin.isTTY}`);
+        log(`- process.stdout.isTTY: ${process.stdout.isTTY}`);
+        log(`- process.stderr.isTTY: ${process.stderr.isTTY}`);
+        // Connection with timeout
         log('Connecting server to transport...');
-        await server.connect(transport);
-        log('Server connected and running');
-        return server;
+        try {
+            await Promise.race([
+                server.connect(transport),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 5000))
+            ]);
+            log('Server connected and running');
+            return server;
+        }
+        catch (connectError) {
+            log(`Transport connection error: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
+            if (connectError instanceof Error && connectError.message === 'Connection timeout') {
+                log('Connection to transport timed out. This might indicate an issue with the stdio transport.');
+            }
+            throw connectError;
+        }
     }
     catch (error) {
         log('Error starting server:', error);

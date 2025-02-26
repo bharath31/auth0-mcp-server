@@ -2,12 +2,29 @@ import fetch from 'node-fetch';
 import debug from 'debug';
 // Set up debug logger
 const log = debug('auth0-mcp:tools');
+// Make debug more verbose for network operations
+const httpLog = debug('auth0-mcp:http');
 // Make sure debug output goes to stderr
 debug.log = (...args) => {
     const msg = args.join(' ');
     process.stderr.write(msg + '\n');
     return true;
 };
+// Add network error handling utility
+function handleNetworkError(error) {
+    if (error.name === 'AbortError') {
+        return 'Request timed out. The Auth0 API did not respond in time.';
+    }
+    else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        return `Connection failed: Unable to reach the Auth0 API (${error.code}). Check your network connection.`;
+    }
+    else if (error.code === 'ECONNRESET') {
+        return 'Connection was reset by the server. Try again later.';
+    }
+    else {
+        return `Network error: ${error.message || error}`;
+    }
+}
 // Define all available tools
 export const TOOLS = [
     {
@@ -59,8 +76,8 @@ export const HANDLERS = {
                 params.append('per_page', request.parameters.per_page.toString());
             }
             else {
-                // Default to 10 items per page if not specified
-                params.append('per_page', '10');
+                // Default to 5 items per page if not specified (reduced from 10 to make output more manageable)
+                params.append('per_page', '5');
             }
             if (request.parameters.include_totals !== undefined) {
                 params.append('include_totals', request.parameters.include_totals.toString());
@@ -75,14 +92,25 @@ export const HANDLERS = {
             try {
                 // Make API request to Auth0 Management API with timeout
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+                const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased to 15 second timeout
+                // Log headers (without sensitive info)
+                httpLog(`Request headers: ${JSON.stringify({
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer [TOKEN_REDACTED]'
+                })}`);
+                // Detailed fetch implementation with more logging
+                httpLog(`Starting network request to ${apiUrl}`);
+                const startTime = Date.now();
                 const response = await fetch(apiUrl, {
                     headers: {
                         'Authorization': `Bearer ${request.token}`,
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
                     },
                     signal: controller.signal
                 });
+                const elapsed = Date.now() - startTime;
+                httpLog(`Request completed in ${elapsed}ms with status ${response.status}`);
                 clearTimeout(timeoutId);
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -95,14 +123,11 @@ export const HANDLERS = {
                     else if (response.status === 403) {
                         errorMessage += '\nError: Forbidden. Your token might not have the required scopes (read:clients). Try running "auth0 login --scopes read:clients" to get the proper permissions.';
                     }
-                    else if (response.status === 404) {
-                        errorMessage += '\nError: Not Found. The Auth0 domain may be incorrect or the API endpoint may have changed.';
+                    else if (response.status === 429) {
+                        errorMessage += '\nError: Rate limited. You have made too many requests to the Auth0 API. Please try again later.';
                     }
                     else if (response.status >= 500) {
-                        errorMessage += '\nError: Server error. The Auth0 service might be experiencing issues. Please try again later.';
-                    }
-                    if (errorText) {
-                        errorMessage += `\nDetails: ${errorText}`;
+                        errorMessage += '\nError: Auth0 server error. The Auth0 API might be experiencing issues. Please try again later.';
                     }
                     return {
                         toolResult: {
@@ -114,32 +139,56 @@ export const HANDLERS = {
                         }
                     };
                 }
-                const applications = await response.json();
-                log(`Successfully retrieved ${Array.isArray(applications) ? applications.length : 'unknown'} applications`);
-                // Format the response in a more user-friendly way
-                let result;
-                if (Array.isArray(applications)) {
-                    result = applications;
-                }
-                else if (applications.clients && Array.isArray(applications.clients)) {
-                    // Handle the case where the response includes pagination info
-                    result = {
-                        clients: applications.clients,
-                        total: applications.total,
-                        page: applications.page,
-                        per_page: applications.per_page,
-                        total_pages: applications.total && applications.per_page ?
-                            Math.ceil(applications.total / applications.per_page) : 1
+                // Parse the response
+                httpLog('Parsing response body');
+                const parseStartTime = Date.now();
+                const responseData = await response.json();
+                const parseElapsed = Date.now() - parseStartTime;
+                httpLog(`Response parsed in ${parseElapsed}ms`);
+                if (!responseData.clients || !Array.isArray(responseData.clients)) {
+                    log('Invalid response format - missing clients array');
+                    log('Response data:', responseData);
+                    return {
+                        toolResult: {
+                            content: [{
+                                    type: 'text',
+                                    text: 'Error: Received invalid response format from Auth0 API. The "clients" array is missing or invalid.'
+                                }],
+                            isError: true
+                        }
                     };
                 }
-                else {
-                    result = applications;
+                // Format applications list
+                const applications = responseData.clients.map(app => ({
+                    id: app.client_id,
+                    name: app.name,
+                    type: app.app_type || 'Unknown',
+                    description: app.description || '-',
+                    domain: app.callbacks?.length ? app.callbacks[0].split('/')[2] : '-'
+                }));
+                // Get pagination info
+                const total = responseData.total || applications.length;
+                const page = responseData.page !== undefined ? responseData.page : 0;
+                const perPage = responseData.per_page || applications.length;
+                const totalPages = Math.ceil(total / perPage);
+                log(`Successfully retrieved ${applications.length} applications (page ${page + 1} of ${totalPages}, total: ${total})`);
+                // Create table format
+                let resultText = `### Auth0 Applications (${applications.length}/${total})\n\n`;
+                resultText += '| Name | Type | Description | Domain |\n';
+                resultText += '|------|------|-------------|--------|\n';
+                applications.forEach(app => {
+                    resultText += `| ${app.name} | ${app.type} | ${app.description || '-'} | ${app.domain || '-'} |\n`;
+                });
+                // Add pagination info
+                if (totalPages > 1) {
+                    resultText += `\n*Page ${page + 1} of ${totalPages} (${perPage} items per page)*`;
+                    resultText += '\n\nTo see more results, use: `auth0_list_applications(page=${nextPage})`';
                 }
                 return {
                     toolResult: {
                         content: [{
-                                type: 'application/json',
-                                json: result
+                                type: 'text',
+                                text: resultText
                             }],
                         isError: false
                     }
@@ -147,26 +196,9 @@ export const HANDLERS = {
             }
             catch (fetchError) {
                 // Handle network-specific errors
-                log('Fetch error:', fetchError);
-                let errorMessage = 'Network error occurred while connecting to Auth0';
-                if (fetchError.name === 'AbortError') {
-                    errorMessage = 'Request timed out after 10 seconds. The Auth0 API may be slow or unreachable.';
-                }
-                else if (fetchError.code === 'ENOTFOUND') {
-                    errorMessage = `DNS lookup failed for domain "${domain}". Please check your internet connection and the domain name.`;
-                }
-                else if (fetchError.code === 'ECONNREFUSED') {
-                    errorMessage = 'Connection refused. The Auth0 server may be down or blocking requests.';
-                }
-                else if (fetchError.code === 'ETIMEDOUT') {
-                    errorMessage = 'Connection timed out. Check your network connectivity or firewall settings.';
-                }
-                else if (fetchError.code === 'CERT_HAS_EXPIRED') {
-                    errorMessage = 'SSL certificate error. The Auth0 API SSL certificate may have issues.';
-                }
-                else {
-                    errorMessage = `Network error: ${fetchError.message || String(fetchError)}`;
-                }
+                httpLog(`Network error: ${fetchError.message || fetchError}`);
+                httpLog('Error details:', fetchError);
+                const errorMessage = handleNetworkError(fetchError);
                 return {
                     toolResult: {
                         content: [{
@@ -179,26 +211,13 @@ export const HANDLERS = {
             }
         }
         catch (error) {
-            // General error handling
-            log('Error in auth0_list_applications handler:', error);
-            let errorMessage = 'An unexpected error occurred';
-            if (error instanceof Error) {
-                errorMessage = `${error.name}: ${error.message}`;
-                if (error.stack) {
-                    log('Error stack:', error.stack);
-                }
-            }
-            else if (typeof error === 'string') {
-                errorMessage = error;
-            }
-            else {
-                errorMessage = JSON.stringify(error);
-            }
+            // Handle any other errors
+            log('Error processing request:', error);
             return {
                 toolResult: {
                     content: [{
                             type: 'text',
-                            text: `Error listing applications: ${errorMessage}`
+                            text: `Error: ${error instanceof Error ? error.message : String(error)}`
                         }],
                     isError: true
                 }
