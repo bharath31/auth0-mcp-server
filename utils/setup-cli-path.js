@@ -51,9 +51,20 @@ function findAuth0CliPath() {
     return process.env.AUTH0_CLI_PATH;
   }
   
-  // Look for local CLI in parent directory (cloned from mcp-server branch)
+  // Get parent directory of current project
+  const parentDir = path.resolve(process.cwd(), '..');
+  log(`Searching for auth0-cli in parent directory: ${parentDir}`, 'info');
+  
+  // Look for local CLI in parent directory
   const possibleLocalPaths = [
+    // Root directory fallbacks first (prioritize if they exist)
+    path.resolve(ROOT_DIR, '..', 'auth0-cli', 'out', 'auth0'),
     path.resolve(ROOT_DIR, '..', 'auth0-cli', 'auth0'),
+    // Current directory parent paths (as requested by user)
+    path.resolve(parentDir, 'auth0-cli', 'out', 'auth0'),
+    path.resolve(parentDir, 'auth0-cli', 'auth0'),
+    // Other common paths as fallbacks
+    path.resolve(process.cwd(), '..', 'auth0-cli', 'out', 'auth0'),
     path.resolve(process.cwd(), '..', 'auth0-cli', 'auth0')
   ];
   
@@ -90,6 +101,7 @@ function findAuth0CliPath() {
   }
   
   log('Auth0 CLI not found. You need to clone and build it from the mcp-server branch.', 'error');
+  log(`Try cloning it to: ${parentDir}/auth0-cli`, 'info');
   log('Run: git clone -b mcp-server https://github.com/auth0/auth0-cli.git && cd auth0-cli && make build', 'info');
   return null;
 }

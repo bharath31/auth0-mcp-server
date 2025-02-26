@@ -26,6 +26,9 @@ A Model Context Protocol (MCP) server implementation for integrating Auth0 Manag
 
 2. **Clone and build the Auth0 MCP server**:
    ```bash
+   # Go back to the root directory
+   cd..
+   
    # Clone the repository
    git clone https://github.com/bharath31/auth0-mcp-server
    cd auth0-mcp-server
